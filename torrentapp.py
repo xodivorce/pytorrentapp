@@ -110,6 +110,8 @@ def main():
 
             handle = session.add_torrent(params)
             console.print(f"\n📁 Downloads will be saved to: [bold green]{os.path.join(save_path, info.name())}[/bold green]\n")
+            console.print("[bold cyan]ℹ️  Press [yellow]Ctrl+C[/yellow] at any time to pause and save your download progress. You can resume it later.[/bold cyan]\n")
+            metadata_announced = True
 
         else:
             magnet_link = questionary.text("Paste the magnet link:").ask()
