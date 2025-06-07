@@ -1,0 +1,4 @@
+torrentenv/
+downloads/
+*.fastresume
+.DS_Store
