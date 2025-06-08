@@ -51,8 +51,8 @@ def main():
     choice = questionary.select(
         "Choose the source:",
         choices=[
-            "Torrent file",
-            "Magnet link"
+            "1. Torrent file",
+            "2. Magnet link"
         ]
     ).ask()
 
