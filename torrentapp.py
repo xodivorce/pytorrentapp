@@ -51,8 +51,8 @@ def main():
     choice = questionary.select(
         "Choose the source:",
         choices=[
-            "1. Torrent file",
-            "2. Magnet link"
+            "Torrent file",
+            "Magnet link"
         ]
     ).ask()
 
@@ -63,14 +63,48 @@ def main():
     session = lt.session()
     settings = session.get_settings()
     settings["listen_interfaces"] = "0.0.0.0:6881-6891"
-    session.apply_settings(settings)
+    settings["enable_outgoing_utp"] = True
+    settings["enable_incoming_utp"] = True
+    settings["enable_outgoing_tcp"] = True
+    settings["enable_incoming_tcp"] = True
+    settings["max_peerlist_size"] = 5000
+    settings["max_paused_peerlist_size"] = 1000
+    settings["connections_limit"] = 500
+    settings["download_rate_limit"] = 0
+    settings["upload_rate_limit"] = 0
+    settings["alert_mask"] = lt.alert.category_t.all_categories
+    settings["announce_to_all_trackers"] = True
+    settings["announce_to_all_tiers"] = True
+    settings["peer_connect_timeout"] = 15
+    settings["request_queue_time"] = 30
+    settings["peer_timeout"] = 60
+    settings["max_queued_disk_bytes"] = 1024 * 1024 * 32
+    settings["max_rejects"] = 50
 
     session.add_dht_router("router.bittorrent.com", 6881)
+    session.add_dht_router("dht.bittorrent.com", 6881)
+    session.add_dht_router("dht.bittorrent.org", 6881)
+    session.add_dht_router("router.bitcoin.com", 6881)
+    session.add_dht_router("router.dht.org", 6881)
+    session.add_dht_router("dht.transmissionbt.com", 6881)
+    session.add_dht_router("router.utorrent.com", 6881)
+    session.add_dht_router("router.bitcomet.com", 6881)
+    session.add_dht_router("dht.libtorrent.org", 25401)
+    session.add_dht_router("dht.aelitis.com", 6881)
+    session.add_dht_router("dht.wifi.pps.tv", 6881)
+    session.add_dht_router("dht1.anan.club", 6881)
+    session.add_dht_router("dht2.anan.club", 6881)
+    session.add_dht_router("dht.torren.to", 6881)
+    session.add_dht_router("dht.waq001.com", 6881)
+    session.add_dht_router("dht.nyaatorrents.info", 6881)
+    session.add_dht_router("dht.kkcomics.com", 6881)
+    session.add_dht_router("dht.3322.org", 6881)
+
     session.start_dht()
     session.start_lsd()
     session.start_upnp()
     session.start_natpmp()
-
+    
     save_path = os.path.join(os.getcwd(), "downloads")
     os.makedirs(save_path, exist_ok=True)
     params = {'save_path': save_path, 'storage_mode': lt.storage_mode_t.storage_mode_sparse}
@@ -109,6 +143,24 @@ def main():
                 params['resume_data'] = resume_data
 
             handle = session.add_torrent(params)
+
+            extra_trackers = [
+                "udp://tracker.opentrackr.org:1337/announce",
+                "udp://tracker.openbittorrent.com:80/announce",
+                "udp://tracker.leechers-paradise.org:6969/announce",
+                "udp://tracker.internetwarriors.net:1337/announce",
+                "udp://exodus.desync.com:6969/announce",
+                "udp://tracker.torrent.eu.org:451/announce",
+                "udp://9.rarbg.to:2710/announce"
+            ]
+
+            for tracker_url in extra_trackers:
+                try:
+                    handle.add_tracker({'url': tracker_url})
+                except Exception as e:
+                    console.print(f"[red]⚠️ Failed to add tracker: {tracker_url} — {e}[/red]")
+                    continue
+                
             console.print(f"\n📁 Downloads will be saved to: [bold green]{os.path.join(save_path, info.name())}[/bold green]\n")
             console.print("[bold cyan]ℹ️  Press [yellow]Ctrl+C[/yellow] at any time to pause and save your download progress. You can resume it later.[/bold cyan]\n")
             metadata_announced = True
@@ -171,9 +223,11 @@ def main():
 
                 if not info and handle.has_metadata():
                     info = handle.get_torrent_info()
-                if choice == "Magnet link" and not metadata_announced and info:
-                    console.print(f"\n 📁 Metadata fetched. Downloads will be saved to: [bold green]{os.path.join(save_path, info.name())}[/bold green]\n")
-                    metadata_announced = True
+                
+                    if choice == "Magnet link" and not metadata_announced:
+                        console.print(f"\n 📁 Metadata fetched. Downloads will be saved to: [bold green]{os.path.join(save_path, info.name())}[/bold green]\n")
+                        metadata_announced = True
+                    continue
 
                 size_gb = (info.total_size() / (1024 ** 3)) if info else 0
                 trackers_list = list(info.trackers()) if info else []
@@ -191,7 +245,7 @@ def main():
                 )
 
                 stats_values = (
-                    f"[green]{format_bytes(s.total_done)}[/green] / [cyan]{format_bytes(info.total_size()) if info else 0}[/cyan]\n"
+                    f"[bold yellow]{format_bytes(s.total_done)}[/bold yellow] / [cyan]{format_bytes(info.total_size()) if info else 0}[/cyan]\n"
                     f"[cyan]{info.num_pieces() if info else '?'}[/cyan]\n"
                     f"[magenta]{len(trackers_list)}[/magenta]\n"
                     f"{activity}\n"
