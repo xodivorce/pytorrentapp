@@ -4,8 +4,17 @@ import os
 import sys
 import questionary
 import warnings
+from datetime import timedelta
+from pathlib import Path
+
 from rich.console import Console
-from rich.progress import Progress, BarColumn, TextColumn, TimeRemainingColumn, TransferSpeedColumn
+from rich.progress import (
+    Progress,
+    BarColumn,
+    TextColumn,
+    TransferSpeedColumn,
+    ProgressColumn,
+)
 from rich.panel import Panel
 from rich.live import Live
 from rich.align import Align
@@ -15,6 +24,26 @@ from rich.text import Text
 
 console = Console()
 warnings.filterwarnings("ignore", category=DeprecationWarning)
+
+# Enable ANSI escape codes in Windows terminal
+if os.name == 'nt':
+    os.system("")
+
+def get_downloads_folder():
+    if sys.platform == "win32":
+        return str(Path.home() / "Downloads")
+    return os.path.expanduser("~/Downloads")
+
+class CustomTimeColumn(ProgressColumn):
+    def render(self, task):
+        if not task.finished and task.time_remaining is not None:
+            remaining = int(task.time_remaining)
+            td = timedelta(seconds=remaining)
+            days = td.days
+            hours, remainder = divmod(td.seconds, 3600)
+            minutes, _ = divmod(remainder, 60)
+            return Text(f"{days}d:{hours}h:{minutes}m", style="progress.remaining")
+        return Text("0d:0h:0m", style="progress.remaining")
 
 def get_resume_file_name(info_hash):
     return f"{info_hash}.fastresume"
@@ -51,9 +80,9 @@ def main():
     choice = questionary.select(
         "Choose the source:",
         choices=[
-            "Torrent file",
-            "Magnet link"
-        ]
+            questionary.Choice("1. Torrent file", value="Torrent file"),
+            questionary.Choice("2. Magnet link", value="Magnet link"),
+        ],
     ).ask()
 
     if not choice:
@@ -63,49 +92,16 @@ def main():
     session = lt.session()
     settings = session.get_settings()
     settings["listen_interfaces"] = "0.0.0.0:6881-6891"
-    settings["enable_outgoing_utp"] = True
-    settings["enable_incoming_utp"] = True
-    settings["enable_outgoing_tcp"] = True
-    settings["enable_incoming_tcp"] = True
-    settings["max_peerlist_size"] = 5000
-    settings["max_paused_peerlist_size"] = 1000
-    settings["connections_limit"] = 500
-    settings["download_rate_limit"] = 0
-    settings["upload_rate_limit"] = 0
-    settings["alert_mask"] = lt.alert.category_t.all_categories
-    settings["announce_to_all_trackers"] = True
-    settings["announce_to_all_tiers"] = True
-    settings["peer_connect_timeout"] = 15
-    settings["request_queue_time"] = 30
-    settings["peer_timeout"] = 60
-    settings["max_queued_disk_bytes"] = 1024 * 1024 * 32
-    settings["max_rejects"] = 50
-
-    session.add_dht_router("router.bittorrent.com", 6881)
-    session.add_dht_router("dht.bittorrent.com", 6881)
-    session.add_dht_router("dht.bittorrent.org", 6881)
-    session.add_dht_router("router.bitcoin.com", 6881)
-    session.add_dht_router("router.dht.org", 6881)
-    session.add_dht_router("dht.transmissionbt.com", 6881)
-    session.add_dht_router("router.utorrent.com", 6881)
-    session.add_dht_router("router.bitcomet.com", 6881)
-    session.add_dht_router("dht.libtorrent.org", 25401)
-    session.add_dht_router("dht.aelitis.com", 6881)
-    session.add_dht_router("dht.wifi.pps.tv", 6881)
-    session.add_dht_router("dht1.anan.club", 6881)
-    session.add_dht_router("dht2.anan.club", 6881)
-    session.add_dht_router("dht.torren.to", 6881)
-    session.add_dht_router("dht.waq001.com", 6881)
-    session.add_dht_router("dht.nyaatorrents.info", 6881)
-    session.add_dht_router("dht.kkcomics.com", 6881)
-    session.add_dht_router("dht.3322.org", 6881)
+    if sys.platform == "win32":
+        settings["disk_io_write_mode"] = 2  # More stable on Windows
+    session.apply_settings(settings)
 
     session.start_dht()
     session.start_lsd()
     session.start_upnp()
     session.start_natpmp()
-    
-    save_path = os.path.join(os.getcwd(), "downloads")
+
+    save_path = os.path.join(get_downloads_folder(), "pytorrent")
     os.makedirs(save_path, exist_ok=True)
     params = {'save_path': save_path, 'storage_mode': lt.storage_mode_t.storage_mode_sparse}
 
@@ -119,70 +115,29 @@ def main():
                 console.print("[red]❌ No path entered. Exiting.[/red]")
                 sys.exit(1)
 
-            torrent_path = torrent_path.strip().strip('\'"')
-
-            if os.path.isfile(torrent_path):
-                pass
-            elif os.path.isdir(torrent_path):
-                console.print(f"[red]❌ Directory input not supported. Please enter the full path to a .torrent file.[/red]")
-                sys.exit(1)
-            else:
-                console.print(f"[red]❌ Path does not exist: {torrent_path}[/red]")
+            torrent_path = os.path.normpath(torrent_path.strip().strip('\'"'))
+            if not os.path.isfile(torrent_path):
+                console.print(f"[red]❌ Invalid file path: {torrent_path}[/red]")
                 sys.exit(1)
 
-            try:
-                info = lt.torrent_info(torrent_path)
-            except Exception as e:
-                console.print(f"[red]❌ Failed to load torrent info: {e}[/red]")
-                sys.exit(1)
-
+            info = lt.torrent_info(torrent_path)
             params['ti'] = info
 
-            resume_data = load_resume_data(str(info.info_hash()))
-            if resume_data:
-                params['resume_data'] = resume_data
 
             handle = session.add_torrent(params)
 
-            extra_trackers = [
-                "udp://tracker.opentrackr.org:1337/announce",
-                "udp://tracker.openbittorrent.com:80/announce",
-                "udp://tracker.leechers-paradise.org:6969/announce",
-                "udp://tracker.internetwarriors.net:1337/announce",
-                "udp://exodus.desync.com:6969/announce",
-                "udp://tracker.torrent.eu.org:451/announce",
-                "udp://9.rarbg.to:2710/announce"
-            ]
-
-            for tracker_url in extra_trackers:
-                try:
-                    handle.add_tracker({'url': tracker_url})
-                except Exception as e:
-                    console.print(f"[red]⚠️ Failed to add tracker: {tracker_url} — {e}[/red]")
-                    continue
-                
-            console.print(f"\n📁 Downloads will be saved to: [bold green]{os.path.join(save_path, info.name())}[/bold green]\n")
-            console.print("[bold cyan]ℹ️  Press [yellow]Ctrl+C[/yellow] at any time to pause and save your download progress. You can resume it later.[/bold cyan]\n")
-            metadata_announced = True
+            console.print(f"\n ⬇️ Metadata fetched! Downloads will be saved to:\n[bold green]{os.path.join(save_path, info.name())}[/bold green]\n")
 
         else:
             magnet_link = questionary.text("Paste the magnet link:").ask()
-            if not magnet_link:
-                console.print("[red]❌ No magnet link entered. Exiting.[/red]")
+            if not magnet_link or not magnet_link.strip().startswith("magnet:"):
+                console.print("[red]❌ Invalid magnet link.[/red]")
                 sys.exit(1)
 
-            magnet_link = magnet_link.strip().strip('\'"')
-
-            if not magnet_link.startswith("magnet:"):
-                console.print("[red]❌ Invalid magnet link format.[/red]")
-                sys.exit(1)
-
-            handle = lt.add_magnet_uri(session, magnet_link, params)
+            handle = lt.add_magnet_uri(session, magnet_link.strip(), params)
             if handle is None:
-                console.print("[red]❌ Failed to add magnet link. Handle is None.[/red]")
+                console.print("[red]❌ Failed to add magnet link.[/red]")
                 sys.exit(1)
-
-            console.print(f"\n⬇️ Downloads will be saved to: [bold green]{save_path}[/bold green]\n")
 
     except Exception as e:
         console.print(f"[red]❌ Error adding torrent/magnet: {e}[/red]")
@@ -193,21 +148,20 @@ def main():
         BarColumn(),
         TextColumn("[progress.percentage]{task.percentage:>3.1f}%"),
         TransferSpeedColumn(),
-        TimeRemainingColumn(),
+        CustomTimeColumn(),
         console=console,
         transient=True,
     )
-    task_id = progress.add_task("[cyan]Downloading...", total=100)
+    task_id = progress.add_task("[cyan]Downloading...", total=info.total_size())
 
     states = ['queued', 'checking', 'downloading metadata', 'downloading', 'finished', 'seeding', 'allocating', 'checking fastresume']
-
     metadata_announced = False
 
     try:
         with Live(console=console, refresh_per_second=4) as live:
             while True:
                 s = handle.status()
-                progress.update(task_id, completed=s.progress * 100)
+                progress.update(task_id, completed=s.total_done)
 
                 state_str = states[s.state] if s.state < len(states) else "unknown"
                 if state_str == 'downloading metadata':
@@ -223,7 +177,6 @@ def main():
 
                 if not info and handle.has_metadata():
                     info = handle.get_torrent_info()
-                
                     if choice == "Magnet link" and not metadata_announced:
                         console.print(f"\n 📁 Metadata fetched. Downloads will be saved to: [bold green]{os.path.join(save_path, info.name())}[/bold green]\n")
                         metadata_announced = True
@@ -290,13 +243,8 @@ def main():
                 time.sleep(1)
 
     except KeyboardInterrupt:
-        console.print("\n\n[bold yellow]🔁 Stopping download and saving resume data...[/bold yellow]")
-        if handle:
-            save_resume_data(handle)
-            console.print("[bold green]✅ Resume data saved.[/bold green]")
+        console.print("\n\n[bold yellow]🔁 Stopping download...[/bold yellow]")
         sys.exit(0)
-
-    save_resume_data(handle)
     console.print("[bold green]\n✅ Download completed![/bold green]\n")
 
 if __name__ == "__main__":
